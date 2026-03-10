@@ -1,0 +1,29 @@
+# Variables de entorno y secretos
+.env
+*.env
+
+# Base64 y archivos pesados generados
+daia_icon_b64.txt
+
+# Almacenamiento de Qdrant (vectores, no deben subirse)
+qdrant_storage/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+env/
+.venv/
+
+# Carpeta de contratos (datos confidenciales)
+CONTRATOS/
+data/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+fastapi.pid
