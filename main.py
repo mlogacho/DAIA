@@ -1,6 +1,8 @@
 import os
 import re
+import time
 import requests
+from bs4 import BeautifulSoup
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -52,6 +54,47 @@ if not OPENAI_API_KEY or OPENAI_API_KEY == "tu_clave_de_openai_aqui":
 # Catálogo de servicios (id → nombre) — se carga en runtime
 _SERVICE_CATALOG: dict[int, str] = {}
 
+# ─────────────────────────────────────────────
+# CACHÉ WEB - datacom.ec
+# ─────────────────────────────────────────────
+_WEB_CACHE: dict = {"content": "", "fetched_at": 0.0}
+_WEB_CACHE_TTL = 3600  # Refresca cada hora
+
+DATACOM_PAGES = [
+    "https://datacom.ec/",
+    "https://datacom.ec/servicios",
+    "https://datacom.ec/soluciones",
+    "https://datacom.ec/nosotros",
+    "https://datacom.ec/contacto",
+]
+
+def fetch_datacom_website() -> str:
+    """Obtiene y cachea el contenido público del sitio datacom.ec."""
+    global _WEB_CACHE
+    now = time.time()
+    if now - _WEB_CACHE["fetched_at"] < _WEB_CACHE_TTL and _WEB_CACHE["content"]:
+        return _WEB_CACHE["content"]
+
+    ua_headers = {"User-Agent": "Mozilla/5.0 (compatible; DAIA-Bot/1.0)"}
+    parts = []
+    for url in DATACOM_PAGES:
+        try:
+            resp = requests.get(url, headers=ua_headers, timeout=10)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "lxml")
+                for tag in soup(["script", "style", "noscript", "nav", "footer", "iframe"]):
+                    tag.decompose()
+                text = soup.get_text(separator="\n", strip=True)
+                text = re.sub(r"\n{3,}", "\n\n", text)
+                parts.append(f"[Página: {url}]\n{text[:2500]}")
+        except Exception as e:
+            print(f"[Web] Error al obtener {url}: {e}")
+
+    content = "\n\n".join(parts) if parts else "No se pudo obtener contenido del sitio web de Datacom."
+    _WEB_CACHE = {"content": content, "fetched_at": now}
+    print(f"[Web] Sitio datacom.ec cargado: {len(content)} caracteres desde {len(parts)} páginas.")
+    return content
+
 def load_service_catalog():
     """Carga el catálogo de servicios para mapear IDs a nombres."""
     global _SERVICE_CATALOG
@@ -74,7 +117,8 @@ REGLAS ESTRICTAS:
 1. Identidad: Eres DAIA. Usa un tono profesional, eficiente y colaborativo en español.
 2. PRIORIDAD DE FUENTES (de mayor a menor):
    - PRIMERO: Usa los datos del CRM EN TIEMPO REAL (sección "DATOS EN TIEMPO REAL DEL CRM"). Si hay datos ahí, ÚSALOS.
-   - SEGUNDO: Usa los documentos PDF si el CRM no tiene la información solicitada.
+   - SEGUNDO: Usa la información del SITIO WEB DE DATACOM (datacom.ec) para preguntas sobre productos, servicios públicos, planes o información comercial de la empresa.
+   - TERCERO: Usa los documentos PDF si las fuentes anteriores no tienen la información solicitada.
    - Solo si NINGUNA fuente tiene la información, responde: "Lo siento, no tengo acceso a esa información específica en los registros actuales de Datacom."
 3. NUNCA respondas el fallback si hay datos del CRM disponibles. Si el CRM devolvió una tabla con información, úsala.
 4. Formato de respuesta:
@@ -85,6 +129,9 @@ REGLAS ESTRICTAS:
 
 --- DATOS EN TIEMPO REAL DEL CRM DE DATACOM (FUENTE PRINCIPAL) ---
 {crm_data}
+
+--- SITIO WEB PÚBLICO DE DATACOM (datacom.ec) ---
+{web_data}
 
 --- DOCUMENTOS PDF (contratos, facturas escaneadas) ---
 {context}
@@ -97,14 +144,14 @@ Respuesta experta de DAIA:"""
 
 PROMPT = PromptTemplate(
     template=SYSTEM_PROMPT,
-    input_variables=["context", "sources_list", "crm_data", "question"]
+    input_variables=["context", "sources_list", "crm_data", "web_data", "question"]
 )
 
 CLASSIFIER_SYSTEM_PROMPT = """Analiza la siguiente consulta del usuario y determina si requiere información INTERNA de Datacom o es una consulta EXTERNA general.
 
 Categorías:
-- INTERNAL: Preguntas sobre contratos, facturas, clientes, RUC, servicios contratados, tickets de soporte, IPs asignadas, precios MRC/NRC, account managers, representantes legales, procesos de Datacom, fechas, montos, o cualquier dato específico de la empresa.
-- EXTERNAL: Saludos, preguntas de cultura general, programación, historia, consejos generales, o temas no relacionados con los datos privados de Datacom.
+- INTERNAL: Preguntas sobre contratos, facturas, clientes, RUC, servicios contratados, tickets de soporte, IPs asignadas, precios MRC/NRC, account managers, representantes legales, procesos de Datacom, fechas, montos, o cualquier dato específico de la empresa. También incluye preguntas sobre los productos, servicios públicos, planes comerciales, cobertura, tecnología o información general publicada en el sitio web de Datacom (datacom.ec).
+- EXTERNAL: Saludos, preguntas de cultura general, programación, historia, consejos generales, o temas no relacionados con Datacom ni con sus servicios, productos o clientes.
 
 Responde ÚNICAMENTE con la palabra 'INTERNAL' o 'EXTERNAL'."""
 
@@ -385,6 +432,9 @@ def chat_with_daia(request: QueryRequest):
         print(f"[CRM Data] Longitud del dato CRM: {len(crm_data_str)} chars")
         print(f"[CRM Data] Preview: {crm_data_str[:300]}")
 
+        web_data_str = fetch_datacom_website()
+        print(f"[Web] Longitud datos web: {len(web_data_str)} chars")
+
         # Si ambas fuentes están vacías
         if not context_str and crm_data_str == "No se encontró información relevante en el CRM.":
             return {
@@ -399,6 +449,7 @@ def chat_with_daia(request: QueryRequest):
             context=context_str or "Sin documentos PDF relevantes para esta consulta.",
             sources_list=sources_list_str,
             crm_data=crm_data_str,
+            web_data=web_data_str,
             question=request.query
         )
 

@@ -7,3 +7,5 @@ langchain-community==0.0.29
 pypdf==4.1.0
 python-dotenv==1.0.1
 requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=5.0.0
