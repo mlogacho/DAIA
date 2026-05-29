@@ -110,7 +110,7 @@ def load_service_catalog():
 # ─────────────────────────────────────────────
 # PROMPTS
 # ─────────────────────────────────────────────
-SYSTEM_PROMPT = """Eres DAIA (Datacom AI Network Assistant), la asistente inteligente oficial de Datacom.
+SYSTEM_PROMPT = """Eres DAIA (Datacom AI Assistant), la asistente inteligente oficial de Datacom.
 Tu propósito es facilitar información precisa y confidencial sobre clientes, servicios, contratos y procesos internos.
 
 REGLAS ESTRICTAS:
